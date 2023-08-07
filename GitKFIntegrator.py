@@ -70,6 +70,46 @@ def setup_editor_cfg():
 	with open(kfeditor_cfg, 'w') as file:
 		file.writelines(modified_lines)
 
+def get_log_info():
+	with open (log_dir + "\\" + "Launch.log", 'r') as file:
+		lines = file.readlines()
+
+	results = ""
+	section_stage = 0
+	compile_state = -1
+	for line in lines:
+		match(section_stage):
+			case 0:
+				if "Executing Class UnrealEd.MakeCommandlet" in line:
+					section_stage = 1
+			case 1:
+				match(compile_state):
+					case -1:
+						if "Scripts successfully compiled" in line:
+							compile_state = 0
+							line = line.split(" - ")[0] + "\n"
+							results += line.replace("Log: ", "")
+						elif "Compile aborted due to errors." in line:
+							compile_state = 2
+							results += line.replace("Log: ", "")
+						elif "No scripts need recompiling." in line:
+							compile_state = 0
+							results += line.replace("Log: ", "")
+					case 0:
+						if "Warning/Error Summary" in line:
+							compile_state = 1
+							results += line.replace("Log: ", "")
+						elif "Success - " in line:
+							results += line.replace("Log: ", "")
+							return {"log" : results, "state" : compile_state}
+					case 1 | 2:
+						if "Src\\" in line:
+							line = line.split("Log")[0] + line.split("Src\\")[1]
+						results += line.replace("Log: ", "")
+						if "Success - " in line or "Failure - " in line:
+							return {"log" : results, "state" : compile_state}
+	return {"log" : results, "state" : -1}
+
 if __name__ == "__main__":
 	try:
 		# init
@@ -83,17 +123,19 @@ if __name__ == "__main__":
 		observer = Observer()
 		observer.schedule(event_handler, log_dir, recursive=False)
 		observer.start()
-		subprocess.Popen(kfeditor_dir + "/kfeditor make")
+		kfeditor = subprocess.Popen(kfeditor_dir + "/kfeditor make")
 		try:
 			i = 0
 			logging.info("Compiling...")
 			while event_handler.log_mod_count < 2:
 				time.sleep(1)
-			logging.info("The second modifying is detected.")
+			print("\n" + get_log_info()["log"])
+			logging.info("state: " + str(get_log_info()["state"]))
 
 		finally:
 			observer.stop()
 			observer.join()
+			kfeditor.terminate()
 
 	except:
 		print("[ERROR]\tFatal Error!")
