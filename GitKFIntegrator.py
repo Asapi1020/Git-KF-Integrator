@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import logging
+import colorlog
 import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -16,6 +17,16 @@ mod_packages_in_path = "..\\..\\KFGame\\GitSrc\\CD-Combined-Edition"
 mod_output_dir = "..\\..\\KFGame\\Unpublished\\BrewedPC\\Script"
 mod_packages = ["CustomHUD", "CombinedCD2", "CombinedCDContent"]
 
+repo_path = "C:\\Users\\maima\\Documents\\My Games\\KillingFloor2\\KFGame\\GitSrc\\CD-Combined-Edition"
+
+language_for_cooking = "int"
+map_name = "kf-subsynth"
+game_mode = "CombinedCD2.CD_Survival"
+mutators = ["FriendlyHUD.FriendlyHUDMutator"]
+difficulty = 3
+game_length = 2
+other_opt = ""
+
 class MyHandler(FileSystemEventHandler):
 	log_mod_count = 0
 
@@ -29,13 +40,24 @@ class MyHandler(FileSystemEventHandler):
 		file_name = event.src_path.replace((log_dir + "\\"), "")
 		print("[Created]", file_name, sep="\t")
 
+def setup_logger():
+	l = colorlog.getLogger()
+	l.setLevel(logging.DEBUG)
+	handler = colorlog.StreamHandler()
+	handler.setFormatter(colorlog.ColoredFormatter('%(log_color)s%(message)s'))
+	l.addHandler(handler)
+	return l
+
+def gitprocess(cmd):
+	subprocess.run("git " + cmd, cwd=repo_path)
+
 def get_mod_packages_section():
 	line = "[ModPackages]\n"
 	line += "ModPackagesInPath=" + mod_packages_in_path + "\n"
 	line += "ModOutputDir=" + mod_output_dir + "\n"
 	for i in range(len(mod_packages)):
 		line += "ModPackages=" + mod_packages[i] + "\n"
-	print("\n" + line)
+	print(line)
 	return line
 
 def setup_editor_cfg():
@@ -104,39 +126,105 @@ def get_log_info():
 							return {"log" : results, "state" : compile_state}
 					case 1 | 2:
 						if "Src\\" in line:
-							line = line.split("Log")[0] + line.split("Src\\")[1]
+							line = "<Warning>" + line.split("Log")[0] + line.split("Src\\")[1]
 						results += line.replace("Log: ", "")
 						if "Success - " in line or "Failure - " in line:
 							return {"log" : results, "state" : compile_state}
 	return {"log" : results, "state" : -1}
 
+def output_log(log, logger):
+	splitbuf = log.split("\n")
+	for line in splitbuf:
+		if "Success - " in line:
+			logger.info(line)
+		elif "<Warning>" in line:
+			line = line.replace("<Warning>", "")
+			if "Error, " in line:
+				logger.critical(line)
+			else:
+				logger.warning(line)
+		elif "Failure - " in line:
+			logger.critical(line)
+		else:
+			logger.debug(line)
+
+def setup_launch_cmd():
+	cmd = map_name
+	if game_mode != "":
+		cmd += "?game=" + game_mode
+	if len(mutators) > 0:
+		cmd += "?mutator="
+		cmd += ",".join(mutators)
+	cmd += "?difficulty=" + str(difficulty)
+	cmd += "?gamelength=" + str(game_length)
+	if other_opt != "":
+		cmd += other_opt
+
+	cmd += " -useunpublished"
+	cmd += " -languageforcooking=" + language_for_cooking
+	cmd += " -log"
+	return cmd
+
 if __name__ == "__main__":
 	try:
 		# init
-		logging.basicConfig(level=logging.INFO,
-    						format="[Log]\t%(message)s")
-		subprocess.run("git --version")
+		logger = setup_logger()
+		gitprocess("--version")
+		gitprocess("status")
 		setup_editor_cfg()
 
 		# compile with tracking
-		event_handler = MyHandler() #LoggingEventHandler()
+		event_handler = MyHandler()
 		observer = Observer()
 		observer.schedule(event_handler, log_dir, recursive=False)
 		observer.start()
-		kfeditor = subprocess.Popen(kfeditor_dir + "/kfeditor make")
+		kfeditor = subprocess.Popen(kfeditor_dir + "\\kfeditor make")
 		try:
 			i = 0
-			logging.info("Compiling...")
+			logger.info("Compiling...")
 			while event_handler.log_mod_count < 2:
 				time.sleep(1)
-			print("\n" + get_log_info()["log"])
-			logging.info("state: " + str(get_log_info()["state"]))
 
 		finally:
 			observer.stop()
 			observer.join()
 			kfeditor.terminate()
 
+		# Automatically git add for successful compiling
+		log_info = get_log_info()
+		output_log("\n" + log_info["log"], logger)
+		match log_info["state"]:
+			case 0:
+				gitprocess("add -A")
+				gitprocess("status")
+			case 2:
+				sys.exit()
+
+		# Game launch option
+		launch_opt_msg = "Do you launch the game? [y/n]: "
+		res = input(launch_opt_msg)
+		while res.lower() != "y":
+			if res.lower() == "n":
+				sys.exit()
+			logger.error("[ERROR] Wrong Input!!!")
+			res = input(launch_opt_msg)
+
+		launch_cmd = setup_launch_cmd()
+		logger.info("Launching... " + launch_cmd)
+		subprocess.run(kfeditor_dir + "\\KFGame.exe " + launch_cmd)
+
+		commit_opt_msg = "Do you commit staged files? [y/n]: "
+		res = input(commit_opt_msg)
+		while res.lower() != "y":
+			if res.lower() == "n":
+				sys.exit()
+			logger.error("[ERROR] Wrong Input!!!")
+			res = input(commit_opt_msg)
+		
+		res = input("Leave messages: ")
+		gitprocess("commit -m \"" + res + "\"")
+		gitprocess("status")
+
 	except:
-		print("[ERROR]\tFatal Error!")
+		# logger.critical("[ERROR]\tFatal Error!")
 		sys.exit()
