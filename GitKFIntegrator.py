@@ -6,18 +6,16 @@ import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-game_dir = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\killingfloor2"
-kfeditor_dir = game_dir + "\\Binaries\\Win64"
+steam_dir = "C:\\Program Files (x86)"
+kfeditor_dir = steam_dir + "\\Steam\\steamapps\\common\\killingfloor2\\Binaries\\Win64"
 
 home_dir = "C:\\Users\\maima\\Documents\\My Games\\KillingFloor2"
 kfeditor_cfg = home_dir + "\\KFGame\\Config\\KFEditor.ini"
 log_dir = home_dir + "\\KFGame\\Logs"
 
-mod_packages_in_path = "..\\..\\KFGame\\GitSrc\\CD-Combined-Edition"
+mod_packages_in_path = "C:\\Users\\maima\\Documents\\My Games\\KillingFloor2\\KFGame\\GitSrc\\CD-Combined-Edition"
 mod_output_dir = "..\\..\\KFGame\\Unpublished\\BrewedPC\\Script"
 mod_packages = ["CustomHUD", "CombinedCD2", "CombinedCDContent"]
-
-repo_path = "C:\\Users\\maima\\Documents\\My Games\\KillingFloor2\\KFGame\\GitSrc\\CD-Combined-Edition"
 
 language_for_cooking = "int"
 map_name = "kf-subsynth"
@@ -49,7 +47,7 @@ def setup_logger():
 	return l
 
 def gitprocess(cmd):
-	subprocess.run("git " + cmd, cwd=repo_path)
+	subprocess.run("git " + cmd, cwd=mod_packages_in_path)
 
 def get_mod_packages_section():
 	line = "[ModPackages]\n"
@@ -140,11 +138,11 @@ def output_log(log, logger):
 		elif "<Warning>" in line:
 			line = line.replace("<Warning>", "")
 			if "Error, " in line:
-				logger.critical(line)
+				logger.error(line)
 			else:
 				logger.warning(line)
 		elif "Failure - " in line:
-			logger.critical(line)
+			logger.error(line)
 		else:
 			logger.debug(line)
 
@@ -165,12 +163,19 @@ def setup_launch_cmd():
 	cmd += " -log"
 	return cmd
 
-if __name__ == "__main__":
+def launch_game(logger):
+	launch_cmd = setup_launch_cmd()
+	logger.info("Launching... " + launch_cmd)
+	subprocess.run(kfeditor_dir + "\\KFGame.exe " + launch_cmd)
+
+def commit():
+	res = input("Leave messages: ")
+	gitprocess("commit -m \"" + res + "\"")
+	gitprocess("status")
+
+def compile_mod(logger):
 	try:
 		# init
-		logger = setup_logger()
-		gitprocess("--version")
-		gitprocess("status")
 		setup_editor_cfg()
 
 		# compile with tracking
@@ -209,9 +214,7 @@ if __name__ == "__main__":
 			logger.error("[ERROR] Wrong Input!!!")
 			res = input(launch_opt_msg)
 
-		launch_cmd = setup_launch_cmd()
-		logger.info("Launching... " + launch_cmd)
-		subprocess.run(kfeditor_dir + "\\KFGame.exe " + launch_cmd)
+		launch_game(logger)
 
 		commit_opt_msg = "Do you commit staged files? [y/n]: "
 		res = input(commit_opt_msg)
@@ -221,10 +224,26 @@ if __name__ == "__main__":
 			logger.error("[ERROR] Wrong Input!!!")
 			res = input(commit_opt_msg)
 		
-		res = input("Leave messages: ")
-		gitprocess("commit -m \"" + res + "\"")
-		gitprocess("status")
+		commit()
 
 	except:
-		# logger.critical("[ERROR]\tFatal Error!")
+		sys.exit()
+
+if __name__ == "__main__":
+	try:
+		logger = setup_logger()
+		gitprocess("--version")
+		gitprocess("status")
+		res = input("0-Compile, 1-Test, 2-commit: ")
+		if res == "0":
+			compile_mod(logger)
+		elif res == "1":
+			launch_game(logger)
+		elif res == "2":
+			commit()
+		else:
+			logger.error("Aborted due to error")
+			sys.exit()
+
+	except:
 		sys.exit()
